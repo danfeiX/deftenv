@@ -1,1 +1,1 @@
-assets_path = "/Users/danfeixu/workspace/daf-env/deftenv/assets/"  # TODO: detect asset
+assets_path = "/Users/danfeixu/workspace/deftenv/deftenv/assets/"  # TODO: detect asset

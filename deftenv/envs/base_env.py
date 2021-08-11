@@ -125,7 +125,7 @@ class BaseEnv(object):
             joint_max=self._gripper_joint_max
         )
         gripper.env = self
-        gripper.load(os.path.join(deftenv.assets_path, 'models/grippers/basic_gripper/gripper.urdf'))
+        gripper.load(os.path.join(deftenv.assets_path, 'grippers/basic_gripper/gripper.urdf'))
         robot = ConstraintActuatedRobot(
             eef_link_name="eef_link", init_base_pose=self._robot_base_pose, gripper=gripper)
 
@@ -139,7 +139,7 @@ class BaseEnv(object):
             finger_link_names=("left_gripper", "left_tip", "right_gripper", "right_tip")
         )
         shadow_gripper.load(
-            os.path.join(deftenv.assets_path, 'models/grippers/basic_gripper/gripper_plannable.urdf'),
+            os.path.join(deftenv.assets_path, 'grippers/basic_gripper/gripper_plannable.urdf'),
             scale=1.2  # make the planner robot slightly larger than the real gripper to allow imprecise plan
         )
         arm = Arm(joint_names=("txj", "tyj", "tzj", "rxj", "ryj", "rzj"))

@@ -6,7 +6,7 @@ from copy import deepcopy
 import deftenv.pybullet_tools.utils as PBU
 import deftenv.pybullet_tools.transformations as T
 import deftenv.utils.transform_utils as TU
-from deftenv.envs.objects import Object
+from deftenv.envs.base_objects import Object
 
 
 class ObjectBank(object):

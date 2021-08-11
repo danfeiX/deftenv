@@ -6,7 +6,7 @@ import pybullet as p
 import deftenv
 
 
-from deftenv.envs.objects import InteractiveObj, YCBObject
+from deftenv.envs.base_objects import InteractiveObj, YCBObject
 from deftenv.envs.camera import Camera
 import deftenv.utils.env_utils as EU
 import deftenv.pybullet_tools.utils as PBU
@@ -147,7 +147,7 @@ class Kitchen(BaseEnv):
         # p.loadMJCF(os.path.join(pybullet_data.getDataPath(), "mjcf/ground_plane.xml"))
 
     def _create_objects(self):
-        drawer = InteractiveObj(filename=os.path.join(deftenv.assets_path, 'models/cabinet2/cabinet_0007.urdf'))
+        drawer = InteractiveObj(filename=os.path.join(deftenv.assets_path, 'cabinet2/cabinet_0007.urdf'))
         drawer.load()
         drawer.set_position([0, 0, 0.5])
         p.setJointMotorControl2(drawer.body_id, 2, p.POSITION_CONTROL, force=0)
@@ -177,7 +177,7 @@ class Kitchen(BaseEnv):
         self.interactive_objects.add_object("faucet_coffee", o)
 
         o = CoffeeMachine(
-            filename=os.path.join(deftenv.assets_path, "models/coffee_machine_slim/102901.urdf"),
+            filename=os.path.join(deftenv.assets_path, "coffee_machine_slim/102901.urdf"),
             beans_set=self.objects["faucet_coffee"].beads,
             num_beans_trigger=5,
             beads_color=(162/255, 80/255, 55/255, 1),

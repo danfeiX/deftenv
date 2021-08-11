@@ -2,7 +2,7 @@ import os
 
 import pybullet as p
 import pybullet_data
-from deftenv.envs.objects import Object
+from deftenv.envs.base_objects import Object
 
 from deftenv.envs.camera import Camera
 import deftenv.pybullet_tools.utils as PBU

@@ -89,10 +89,10 @@ PR2_LEFT_CARRY_CONFS = {
 
 #####################################
 
-PR2_URDF = "models/pr2_description/pr2.urdf" # 87 joints
+PR2_URDF = "pr2_description/pr2.urdf" # 87 joints
 #PR2_URDF = "models/pr2_description/pr2_hpn.urdf"
 #PR2_URDF = "models/pr2_description/pr2_kinect.urdf"
-DRAKE_PR2_URDF = "models/drake/pr2_description/urdf/pr2_simplified.urdf" # 82 joints
+DRAKE_PR2_URDF = "drake/pr2_description/urdf/pr2_simplified.urdf" # 82 joints
 
 def is_drake_pr2(robot): # 87
     return (get_body_name(robot) == 'pr2') and (get_num_joints(robot) == 82)
