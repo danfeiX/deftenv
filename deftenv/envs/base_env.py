@@ -15,10 +15,9 @@ from deftenv.envs.robots import Arm, ConstraintActuatedRobot, PlannerRobot, Robo
 
 
 def env_factory(name, **kwargs):
-    from deftenv.envs.tool_envs import SimpleToolAP, SimpleToolHardAP, SimpleToolStackAP, ToolAP, VizToolAP, \
-        ToolStackAP, ToolStackEasyAP, ToolStackMediumAP, ToolStackMediumHardAP
-    from deftenv.envs.kitchen_envs import KitchenDrawerAP, KitchenAP, TablePour, KitchenEasyAP, KitchenDualAP, \
-        KitchenDualCoffeeAP, KitchenDualTeaAP
+    from deftenv.envs.tool_envs import SimpleToolAP, SimpleToolHardAP, ToolAP, \
+        ToolStackAP, ToolStackEasyAP, ToolStackMediumAP
+    from deftenv.envs.kitchen_envs import KitchenDualAP, KitchenDualCoffeeAP, KitchenDualTeaAP
     if name.endswith("Skill"):
         name = name[:-5]
         kwargs["use_skills"] = True
@@ -29,16 +28,19 @@ def env_factory(name, **kwargs):
 
 
 class BaseEnv(object):
-    MAX_DPOS = 0.1
-    MAX_DROT = np.pi / 8
+    """
+    A generic wrapper for pybullet-simulated environment
+    """
+    MAX_DPOS = 0.1  # maximum delta position per action step
+    MAX_DROT = np.pi / 8  # maximum delta rotation per action step
 
     def __init__(
             self,
             robot_base_pose,
-            num_sim_per_step,
+            num_sim_per_step=5,
             use_gui=False,
             use_planner=False,
-            hide_planner=True,
+            hide_planner_robot=True,
             sim_time_step=1./240.,
             obs_image=False,
             obs_depth=False,
@@ -53,7 +55,47 @@ class BaseEnv(object):
             plan_joint_limits=None,
             eef_position_limits=None
     ):
-        self._hide_planner = hide_planner
+        """
+        Create an env instance
+        Args:
+            robot_base_pose (tuple): global pose of the robot base link (pos, quat_orn)
+
+            num_sim_per_step (int): number of physical simulation step to run for each action step
+
+            use_gui (bool): whether to show the default pybullet GUI renderer
+
+            use_planner (bool): whether to use motion planner in the environment
+
+            use_skills (bool): whether to . Must set use_planner to True
+
+            hide_planner_robot (bool): if use_planner is True, the environment would create a replica of the robot for
+            collision checking during motion planning. Set hide_planner_robot to True to hide the replica robot
+
+            sim_time_step (float): physical simulation time step size
+
+            obs_image (bool): whether to render image observation
+
+            obs_depth (bool): whether to render depth observation
+
+            obs_segmentation (bool): whether to generate object segmentation mask observation
+
+            camera_width (int): width of the image observation
+
+            camera_height (int): height of the image observation
+
+            obs_crop (bool): whether to return a list of object image crops observation
+
+            obs_crop_size (tuple): crop size (height, width)
+
+            gripper_use_magic_grasp (bool): whether to use magic grasp (see Gripper class for explanation)
+
+            gripper_joint_max (float): maximum opening angle for each of the articulated gripper joints
+
+            plan_joint_limits (dict): joint limits for motion planning {joint_name: (min, max)}
+
+            eef_position_limits (float): workspace limit in cartesian space (box)
+        """
+        self._hide_planner_robot = hide_planner_robot
         self._robot_base_pose = robot_base_pose
         self._num_sim_per_step = num_sim_per_step
         self._sim_time_step = sim_time_step
@@ -70,8 +112,9 @@ class BaseEnv(object):
         self._plan_joint_limits = plan_joint_limits
         self._eef_position_limits = eef_position_limits
 
+        # initialize object inventory
         self.objects = EU.ObjectBank()
-        self.interactive_objects = EU.ObjectBank()
+        self.stateful_objects = EU.ObjectBank()
         self.fixtures = EU.ObjectBank()
         self.object_visuals = []
         self.planner = None
@@ -89,12 +132,12 @@ class BaseEnv(object):
             assert use_planner
             self._create_skill_lib()
 
-        self.initial_world = PBU.WorldSaver()
+        self.initial_world_state = PBU.WorldSaver()
         assert isinstance(self.robot, Robot)
 
     @property
     def action_dimension(self):
-        """Action dimension"""
+        """Action dimension for end-effector control"""
         return 7  # [x, y, z, ai, aj, ak, g]
 
     @property
@@ -105,14 +148,16 @@ class BaseEnv(object):
         raise NotImplementedError
 
     @property
-    def black_listed_skills(self):
+    def excluded_skills(self):
         return []
 
     def _setup_simulation(self):
         if self._use_gui:
-            # p.connect(p.GUI)
-            p.connect(p.GUI, options='--background_color_red=1.0 --background_color_green=1.0 --background_color_blue=1.0')
+            # white background
+            p.connect(
+                p.GUI, options='--background_color_red=1.0 --background_color_green=1.0 --background_color_blue=1.0')
         else:
+            # headless rendering
             p.connect(p.DIRECT)
         p.setGravity(0, 0, -9.8)
         p.setTimeStep(self._sim_time_step)
@@ -122,9 +167,9 @@ class BaseEnv(object):
             joint_names=("left_gripper_joint", "right_gripper_joint"),
             finger_link_names=("left_gripper", "left_tip", "right_gripper", "right_tip"),
             use_magic_grasp=self._gripper_use_magic_grasp,
-            joint_max=self._gripper_joint_max
+            joint_max=self._gripper_joint_max,
+            env=self
         )
-        gripper.env = self
         gripper.load(os.path.join(deftenv.assets_path, 'grippers/basic_gripper/gripper.urdf'))
         robot = ConstraintActuatedRobot(
             eef_link_name="eef_link", init_base_pose=self._robot_base_pose, gripper=gripper)
@@ -134,6 +179,8 @@ class BaseEnv(object):
         self.robot = robot
 
     def _create_planner(self):
+        """Create a virtual replica of the robot for collision detection in motion planning"""
+
         shadow_gripper = Gripper(
             joint_names=("left_gripper_joint", "right_gripper_joint"),
             finger_link_names=("left_gripper", "left_tip", "right_gripper", "right_tip")
@@ -153,9 +200,9 @@ class BaseEnv(object):
             joint_limits=self._plan_joint_limits,
             eef_position_limit=self._eef_position_limits
             # plan_objects=PlannerObjectBank.create_from(
-            #     self.objects, scale=1.2, rgba_alpha=0. if self._hide_planner else 0.7)
+            #     self.objects, scale=1.2, rgba_alpha=0. if self._hide_planner_robot else 0.7)
         )
-        planner.setup(self.robot, hide_planner=self._hide_planner)
+        planner.setup(self.robot, hide_planner=self._hide_planner_robot)
         self.planner = planner
 
     def _create_env(self):
@@ -190,7 +237,7 @@ class BaseEnv(object):
         self.camera.set_pose_ypr((0, 0, 0.5), distance=2.0, yaw=45, pitch=-45)
 
     def reset(self):
-        self.initial_world.restore()
+        self.initial_world_state.restore()
         p.stepSimulation()
         self.robot.reset_base_position_orientation(*self._robot_base_pose)
         self.robot.reset()
@@ -198,9 +245,8 @@ class BaseEnv(object):
         self._sample_task()
         if self.skill_lib is not None:
             self.skill_lib.reset()
-        for o in self.interactive_objects.object_list:
+        for o in self.stateful_objects.object_list:
             o.reset()
-        # p.stepSimulation()
 
     def reset_to(self, serialized_world_state, return_obs=True):
         exclude = []
@@ -233,7 +279,7 @@ class BaseEnv(object):
         else:
             self.robot.gripper.ungrasp()
 
-        for o in self.interactive_objects.object_list:
+        for o in self.stateful_objects.object_list:
             o.step(self.objects.object_list, self.robot.gripper)
 
         for _ in range(self._num_sim_per_step):
@@ -295,7 +341,6 @@ class BaseEnv(object):
 
         gvel = np.concatenate(self.robot.get_eef_velocity(), axis=0)
         proprio.append(gvel)
-        # proprio.append(pose_to_array(self.robot.get_eef_position_orientation()))
 
         proprio = np.hstack(proprio).astype(np.float32)
         return {
@@ -454,6 +499,41 @@ class EnvSkillWrapper(object):
         object_name = self.env.objects.names[int(np.argmax(object_index_arr))]
         return self.env.get_constrained_skill_param_sampler(skill_name, object_name, num_samples=num_samples)()
 
+    def sample_skill_params_from_skeletons(self, skill_skeletons):
+        """
+        Sample parameters from skill environment, given a batch of skill skeletons
+
+        Args:
+            skill_skeletons (dict): batches of skill skeletons (skill_index, skill_object_index)
+
+        Returns:
+            param_samples: dict
+        """
+        param_dim = self.skill_lib.action_dimension - len(self.skill_lib)
+        # find unique skills
+        samples_cat = np.concatenate((skill_skeletons["skill_index"], skill_skeletons["skill_object_index"]), axis=1)
+        samples_cat = samples_cat.astype(np.bool)
+        samples_int = samples_cat.dot(1 << np.arange(samples_cat.shape[-1] - 1, -1, -1))  # use one-hot code as binary
+        unique_codes, unique_inds, unique_counts = np.unique(samples_int, return_counts=True, return_index=True)
+
+        param_samples = np.zeros((skill_skeletons["skill_index"].shape[0], param_dim))
+
+        total_samples = 0
+
+        # take batched samples for each group of skills to speed up the sampling process
+        for i, ui in enumerate(unique_inds):
+            ssamples = self.sample_constrained_skill_params(
+                skill_skeletons["skill_index"][ui],
+                skill_skeletons["skill_object_index"][ui],
+                num_samples=int(unique_counts[i])
+            )
+            param_samples[samples_int == unique_codes[i], :] = ssamples[:, len(self.skill_lib):]
+            total_samples += ssamples.shape[0]
+
+        assert total_samples == param_samples.shape[0]
+
+        return dict(skill_params=param_samples)
+
     def action_to_string(self, actions):
         skill_params = actions[:self.skill_lib.action_dimension]
         object_index = int(np.argmax(actions[self.skill_lib.action_dimension:]))
@@ -497,7 +577,7 @@ class EnvSkillWrapper(object):
 
     def __getattr__(self, attr):
         """
-        This method is a fallback option on any methods the original dataset might support.
+        This method is a fallback option on any methods the original class might support.
         """
 
         # using getattr ensures that both __getattribute__ and __getattr__ (fallback) get called
