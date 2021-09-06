@@ -271,6 +271,19 @@ def plan_skill_pour(
         pour_angle_speed=np.pi / 64,
         joint_resolutions=DEFAULT_JOINT_RESOLUTIONS
 ):
+    """
+    Plan a pouring skill
+    Args:
+        planner (PlannerRobot): planner
+        obstacles (list, tuple): a list obstacle ids
+        object_target_pose (tuple): target pose for pouring
+        holding (int): object id for the object in hand
+        pour_angle_speed (float): angular velocity for the pouring motion
+        joint_resolutions (list, tuple): motion planning joint-space resolution
+
+    Returns:
+        path (CartesianPath)
+    """
     grasp_pose = PBU.multiply(PBU.invert(planner.ref_robot.get_eef_position_orientation()), PBU.get_pose(holding))
     object_orn = PBU.get_pose(holding)[1]
     target_pose = PBU.end_effector_from_body((object_target_pose[0], object_orn), grasp_pose)
@@ -355,8 +368,15 @@ def plan_skill_move_path(
 
 class SkillParams(object):
     def __init__(self, low=None, high=None, size=None):
-        self._low = None
-        self._high = None
+        """
+        Container for bounded skill parameters.
+
+        Args:
+            low: bound-low
+            high: bound-high
+            size: length of the parameter array
+        """
+        pass
 
     def sample(self, mode=None, low=None, high=None, choices=None, sampler_fn=None, num_samples=None):
         raise NotImplementedError
@@ -380,6 +400,14 @@ class SkillParams(object):
 
 class SkillParamsContinuous(SkillParams):
     def __init__(self, low=None, high=None, size=None):
+        """
+        Container for bounded skill parameters (continuous).
+
+        Args:
+            low (np.ndarray): bound-low
+            high (np.ndarray): bound-high
+            size: length of the parameter array
+        """
         super(SkillParamsContinuous, self).__init__()
         if size is not None:
             self._low = np.zeros(size)  # place holder
@@ -393,6 +421,20 @@ class SkillParamsContinuous(SkillParams):
         assert np.all(self._high >= self._low)
 
     def sample(self, mode='uniform', low=None, high=None, choices=None, sampler_fn=None, num_samples=None):
+        """
+        Take samples in the parameter bound, with options to specify constraints externally
+
+        Args:
+            mode (str): [uniform, normal, grid]
+            low (np.ndarray): externally specified sample bound-low, must be in the original param bound
+            high (np.ndarray): externally specified sample bound-high, must be in the original param bound
+            choices (list, tuple): a discrete list of parameters, must be in the original param bound
+            sampler_fn (function): a sampler function that returns param samples, must be in the original param bound
+            num_samples (int): num samples to take. Set to None to remove the batch dimension
+
+        Returns:
+            samples
+        """
         batched_sample = num_samples is not None
         if num_samples is not None:
             assert isinstance(num_samples, int) and num_samples >= 1
@@ -435,6 +477,14 @@ class SkillParamsContinuous(SkillParams):
 
 class SkillParamsDiscrete(SkillParams):
     def __init__(self, low=None, high=None, size=None):
+        """
+        Container for bounded skill parameters (one-hot discrete).
+
+        Args:
+            low: not used
+            high: not used
+            size: length of the one-hot vector
+        """
         super(SkillParamsDiscrete, self).__init__()
         assert low is None
         assert high is None
@@ -447,6 +497,20 @@ class SkillParamsDiscrete(SkillParams):
         return self.low
 
     def sample(self, mode=None, low=None, high=None, choices=None, sampler_fn=None, num_samples=None):
+        """
+        Take samples in the parameter bound, with options to specify constraints externally
+
+        Args:
+            mode (str): [uniform, normal, grid]
+            low: not used
+            high: not used
+            choices (list, tuple): a discrete list of parameters, must be in the original param bound
+            sampler_fn (function): a sampler function that returns param samples, must be in the original param bound
+            num_samples (int): num samples to take. Set to None to remove the batch dimension
+
+        Returns:
+            samples
+        """
         batched_sample = num_samples is not None
         if num_samples is not None:
             assert isinstance(num_samples, int) and num_samples >= 1
@@ -482,9 +546,23 @@ class Skill(object):
             releases_holding=False,
             requires_not_holding=False,
             joint_resolutions=DEFAULT_JOINT_RESOLUTIONS,
-            verbose=False,
             precondition_fn=None,
     ):
+        """
+        A convenient object to describe a variety of motion-planning-based skills
+
+        Args:
+            params (dict): a dictionary of parameters: {param_name: SkillParam}
+            name (str): name of the skill
+            requires_holding (bool): requires robot holding an object to be initiated (e.g., placing)
+            acquires_holding (bool): if the robot is expected to hold an object after successful skill execution
+            releases_holding (bool): if the robot is expected to release the object it's holding after successful
+                                    skill execution.
+            requires_not_holding (bool): requires the robot not holding any object to be initiated (e.g., grasping)
+            joint_resolutions (list, tuple): resolution for each joints when planning the skill motion
+            precondition_fn (function): a function that returns True iff the environment satisfies the precondition
+                                        of the skill
+        """
         self.params = params
         if params is None:
             self.params = self.get_default_params()  # dummy
@@ -500,7 +578,6 @@ class Skill(object):
         if acquires_holding:
             assert self.requires_not_holding
         assert not (self.requires_holding and self.requires_not_holding)
-        self.verbose = verbose
         self.precondition_fn = precondition_fn
         self._name = name
 
@@ -509,6 +586,7 @@ class Skill(object):
 
     @property
     def action_dimension(self):
+        """Length of the concatenated parameter arrays"""
         return int(np.sum(p.sample_shape[0] for p in self.params.values()))
 
     def skill_params_to_pose(self, params, target_object_id):
@@ -623,9 +701,22 @@ class GraspDistOrn(Skill):
             grasp_speed=0.05,
             pos_offset=(0, 0, 0),
             joint_resolutions=DEFAULT_JOINT_RESOLUTIONS,
-            verbose=False,
             precondition_fn=None
     ):
+        """
+        Grasping skill with fixed grasping position (center of object)
+        Args:
+            params (dict): a dictionary of parameters: {param_name: SkillParam}
+            name (str): name of the skill
+            reach_distance (float): axis-aligned distance between pre-grasping pose and grasping pose
+            lift_height (float): height to lift (z-axis) after grasping
+            lift_speed (float): speed to lift the object
+            grasp_speed (float): speed to approach the grapsing pose
+            pos_offset (tuple): fixed grasping position offset wrt to the center of the object
+            joint_resolutions (list, tuple): resolution for each joints when planning the skill motion
+            precondition_fn (function): a function that returns True iff the environment satisfies the precondition
+                                        of the skill
+        """
         super(GraspDistOrn, self).__init__(
             params=params,
             name=name,
@@ -634,7 +725,6 @@ class GraspDistOrn(Skill):
             releases_holding=False,
             requires_not_holding=True,
             joint_resolutions=joint_resolutions,
-            verbose=verbose,
             precondition_fn=precondition_fn
         )
         self.lift_height = lift_height
@@ -680,6 +770,7 @@ class GraspDistOrn(Skill):
 
 
 class GraspDistDiscreteOrn(GraspDistOrn):
+    """Grasping skill with discrete skill orientations (chosen from SKILL_ORIENTATION_NAMES)"""
     def get_default_params(self):
         return OrderedDict(
             grasp_distance=SkillParamsContinuous(size=1),
@@ -835,9 +926,18 @@ class PlacePosOrn(Skill):
             retract_distance=0.1,
             joint_resolutions=DEFAULT_JOINT_RESOLUTIONS,
             num_pause_steps=0,
-            verbose=False,
             precondition_fn=None
     ):
+        """
+        Placing skill
+        Args:
+            params (dict): a dictionary of parameters: {param_name: SkillParam}
+            name (str): name of the skill
+            retract_distance (float): axis-aligned distance to retract after placing the object
+            joint_resolutions (list, tuple): resolution for each joints when planning the skill motion
+            precondition_fn (function): a function that returns True iff the environment satisfies the precondition
+                                        of the skill
+        """
         super(PlacePosOrn, self).__init__(
             params=params,
             name=name,
@@ -846,7 +946,6 @@ class PlacePosOrn(Skill):
             acquires_holding=False,
             requires_not_holding=False,
             joint_resolutions=joint_resolutions,
-            verbose=verbose,
             precondition_fn=precondition_fn
         )
         self.retract_distance = retract_distance
@@ -895,6 +994,8 @@ class PlacePosOrn(Skill):
 
 
 class PlacePosDiscreteOrn(PlacePosOrn):
+    """Placing skill with discrete skill orientations (chosen from SKILL_ORIENTATION_NAMES)"""
+
     def get_default_params(self):
         return OrderedDict(
             place_pos=SkillParamsContinuous(size=3),
@@ -945,6 +1046,8 @@ class PlacePosDiscreteOrn(PlacePosOrn):
 
 
 class PlacePosYawOrn(PlacePosOrn):
+    """Placing skill where orientation is fixed except for yaw (radian)"""
+
     def get_default_params(self):
         return OrderedDict(
             place_pos=SkillParamsContinuous(size=3),
@@ -985,6 +1088,7 @@ class PlacePosYawOrn(PlacePosOrn):
 
 
 class PlaceFixed(PlacePosOrn):
+    """Placing at the center of the target object"""
     def get_default_params(self):
         return OrderedDict(
             dummy=SkillParamsContinuous(low=[0], high=[0])
@@ -1022,9 +1126,21 @@ class PourPosOrn(Skill):
             pour_angle_speed=np.pi / 64,
             joint_resolutions=DEFAULT_JOINT_RESOLUTIONS,
             num_pause_steps=30,
-            verbose=False,
             precondition_fn=None
     ):
+        """
+        Skill for pouring stuff from the object that the robot is holding.
+
+        Parameterized by pour_pos (position relative to the target object) and pour_orn (euler-angle)
+        Args:
+            params (dict): a dictionary of parameters: {param_name: SkillParam}
+            name (str): name of the skill
+            pour_angle_speed (float): angular velocity for the pouring motion
+            num_pause_steps (int): number of low-level step to pause after the pouring motion (to wait for decanting)
+            joint_resolutions (list, tuple): resolution for each joints when planning the skill motion
+            precondition_fn (function): a function that returns True iff the environment satisfies the precondition
+                                        of the skill
+        """
         super(PourPosOrn, self).__init__(
             params=params,
             name=name,
@@ -1033,7 +1149,6 @@ class PourPosOrn(Skill):
             releases_holding=False,
             requires_not_holding=False,
             joint_resolutions=joint_resolutions,
-            verbose=verbose,
             precondition_fn=precondition_fn
         )
         self.pour_angle_speed = pour_angle_speed
@@ -1075,6 +1190,11 @@ class PourPosOrn(Skill):
 
 
 class PourPosAngle(PourPosOrn):
+    """
+    Pouring skill that automatically figure out the correct orientation except the tilting angle (radian)
+
+    Parameterized by pour_pos (position relative to the target object) and pour_angle (tilting angle)
+    """
     def get_default_params(self):
         return OrderedDict(
             pour_pos=SkillParamsContinuous(size=3),
@@ -1131,9 +1251,18 @@ class OperatePrismaticPosDistance(Skill):
             name="operate_prismatic_pos_distance",
             joint_resolutions=DEFAULT_JOINT_RESOLUTIONS,
             num_pause_steps=0,
-            verbose=False,
             precondition_fn=None
     ):
+        """
+        Skill for operating an articulated object with prismatic joint (e.g., a drawer)
+        Args:
+            params (dict): a dictionary of parameters: {param_name: SkillParam}
+            name (str): name of the skill
+            num_pause_steps (int): number of low-level step to pause after the pouring motion (to wait for decanting)
+            joint_resolutions (list, tuple): resolution for each joints when planning the skill motion
+            precondition_fn (function): a function that returns True iff the environment satisfies the precondition
+                                        of the skill
+        """
         super(OperatePrismaticPosDistance, self).__init__(
             params=params,
             name=name,
@@ -1142,7 +1271,6 @@ class OperatePrismaticPosDistance(Skill):
             releases_holding=False,
             requires_not_holding=True,
             joint_resolutions=joint_resolutions,
-            verbose=verbose,
             precondition_fn=precondition_fn
         )
         self.num_pause_steps = num_pause_steps
@@ -1190,17 +1318,28 @@ class OperatePrismaticPosDistance(Skill):
         return params
 
 
-class TouchPosition(Skill):
+class TouchPositionPos(Skill):
     def __init__(
             self,
             params=None,
             name="touch_position",
             joint_resolutions=DEFAULT_JOINT_RESOLUTIONS,
             num_pause_steps=0,
-            verbose=False,
             precondition_fn=None
     ):
-        super(TouchPosition, self).__init__(
+        """
+        Skill for touching the surface of an object (e.g., pressing a button)
+
+        Parameterized by the position to touch (relative to the target object)
+        Args:
+            params (dict): a dictionary of parameters: {param_name: SkillParam}
+            name (str): name of the skill
+            num_pause_steps (int): number of low-level step to pause after the pouring motion (to wait for decanting)
+            joint_resolutions (list, tuple): resolution for each joints when planning the skill motion
+            precondition_fn (function): a function that returns True iff the environment satisfies the precondition
+                                        of the skill
+        """
+        super(TouchPositionPos, self).__init__(
             params=params,
             name=name,
             requires_holding=False,
@@ -1208,7 +1347,6 @@ class TouchPosition(Skill):
             releases_holding=False,
             requires_not_holding=True,
             joint_resolutions=joint_resolutions,
-            verbose=verbose,
             precondition_fn=precondition_fn
         )
         self.num_pause_steps = num_pause_steps
@@ -1258,10 +1396,22 @@ class MoveWithPosDiscreteOrn(Skill):
             joint_resolutions=DEFAULT_JOINT_RESOLUTIONS,
             move_speed=0.05,
             num_pause_steps=0,
-            verbose=False,
             precondition_fn=None,
             orientations=None,
     ):
+        """
+        Skill for moving between a start pose and an end pose
+
+        Parameterized by a starting pose relative to an object (start_pos, start_orn) and a movement offset (move_pos)
+
+        Args:
+            params (dict): a dictionary of parameters: {param_name: SkillParam}
+            name (str): name of the skill
+            num_pause_steps (int): number of low-level step to pause after the pouring motion (to wait for decanting)
+            joint_resolutions (list, tuple): resolution for each joints when planning the skill motion
+            precondition_fn (function): a function that returns True iff the environment satisfies the precondition
+                                        of the skill
+        """
         self.orientations = orientations
         if self.orientations is None:
             self.orientations = SKILL_ORIENTATIONS
@@ -1276,7 +1426,6 @@ class MoveWithPosDiscreteOrn(Skill):
             releases_holding=True,
             requires_not_holding=False,
             joint_resolutions=joint_resolutions,
-            verbose=verbose,
             precondition_fn=precondition_fn
         )
 
@@ -1362,9 +1511,9 @@ class ConditionSkill(Skill):
             self,
             name="condition",
             joint_resolutions=DEFAULT_JOINT_RESOLUTIONS,
-            verbose=False,
             precondition_fn=None
     ):
+        """A dummy skill useful for specifying task goal (used by Deep Affordance Foresight)"""
         super(ConditionSkill, self).__init__(
             name=name,
             requires_holding=False,
@@ -1372,7 +1521,6 @@ class ConditionSkill(Skill):
             releases_holding=False,
             requires_not_holding=False,
             joint_resolutions=joint_resolutions,
-            verbose=verbose,
             precondition_fn=precondition_fn
         )
 
@@ -1387,7 +1535,15 @@ class ConditionSkill(Skill):
 
 
 class SkillLibrary(object):
-    def __init__(self, env, planner, obstacles, skills, verbose=False):
+    def __init__(self, env, planner, obstacles, skills):
+        """
+        A convenient object that contains a set of skills
+        Args:
+            env (SkillEnvWrapper): a wrapper environment
+            planner (PlannerRobot): planner
+            obstacles (tuple, list): list of obstacle object ids
+            skills (list): a list of Skill objects
+        """
         self.planner = planner
         self.obstacles = obstacles
         self.env = env
@@ -1397,7 +1553,6 @@ class SkillLibrary(object):
             s.planner = planner
             s.obstacles = obstacles
             s.env = env
-            s.verbose = verbose
 
     def sub_library(self, names):
         skills = [s for s in self.skills if s.name in names]
@@ -1427,9 +1582,14 @@ class SkillLibrary(object):
 
     @property
     def action_dimension(self):
+        """
+        Skill parameter length for all skills in the library prepended with a one-hot index for
+        a skill inside the library.
+        """
         return int(len(self.skills) + np.sum([s.action_dimension for s in self.skills]))
 
     def skill_params_to_string(self, params, target_object_id):
+        """Verbose description of a skill given a parameter"""
         skill_index, skill_params = self._parse_serialized_skill_params(params)
         return self.skills[skill_index].skill_params_to_string(skill_params, target_object_id=target_object_id)
 
@@ -1438,6 +1598,7 @@ class SkillLibrary(object):
         return self.skills[skill_index].skill_params_to_pose(skill_params, target_object_id=target_object_id)
 
     def _parse_serialized_skill_params(self, all_params):
+        """Parse an array-serialized skill parameterr to a skill index and its parameter (in array)"""
         assert len(all_params) == self.action_dimension
         skill_index = int(np.argmax(all_params[:len(self.skills)]))
         assert skill_index < len(self.skills)
@@ -1452,7 +1613,7 @@ class SkillLibrary(object):
 
     def _parse_skill_param_dict(self, all_params):
         """
-        parse skill parameters dictionary
+        parse skill parameters to a dictionary
 
         Args:
             all_params (dict): dict that maps "skill_name | param_name" to params

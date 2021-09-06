@@ -12,7 +12,7 @@ from deftenv.envs.objects import Box, Hook, Tube
 from deftenv.envs.envs import TableTop
 
 
-class SimpleTool(TableTop):
+class ToolBaseEnv(TableTop):
     def __init__(self, **kwargs):
         kwargs["robot_base_pose"] = ([0.3, 0.3, 1.2], [0, 0, 1, 0])
         # kwargs["robot_base_pose"] = ([0.3, 0.3, 1.1], skills.ALL_ORIENTATIONS["top"])
@@ -22,7 +22,7 @@ class SimpleTool(TableTop):
         super(TableTop, self).__init__(**kwargs)
 
     def _create_fixtures(self):
-        super(SimpleTool, self)._create_fixtures()
+        super(ToolBaseEnv, self)._create_fixtures()
 
         o = Tube(color=(0.5, 0.5, 0.5, 0.5), size=(0.3, 0.08, 0.1), width=0.01, mass=1.)
         o.load()
@@ -52,18 +52,13 @@ class SimpleTool(TableTop):
         p.changeDynamics(o.body_id, -1, mass=1000.)
         self.objects.add_object("target", o)
 
-        # setup virtual divider
-        # vm = Box(color=(0.5, 0.5, 0.5, 0.3), size=(1.0, 10, 10), mass=0)
-        # vm.load()
-        # vm.set_position((-0.9, 0, 0.3))
-        # for o in self.objects.body_ids + self.fixtures.body_ids:
-        #     EU.set_collision_between(vm.body_id, o, collision=0)
-        vm = VisualMarker(visual_shape=p.GEOM_BOX,
-                          rgba_color=(0.5, 0.5, 0.5, 0.3),
-                          half_extents=(0.01, 0.6, 0.1),
-                          # half_extents=(0.01, 10.0, 10.0),
-                          initial_offset=(self.eef_x_limit, 0, 0.6)
-                          )
+        # virtual divider to indicate robot workspace
+        vm = VisualMarker(
+            visual_shape=p.GEOM_BOX,
+            rgba_color=(0.5, 0.5, 0.5, 0.3),
+            half_extents=(0.01, 0.6, 0.1),
+            initial_offset=(self.eef_x_limit, 0, 0.6)
+        )
         vm.load()
 
     def _reset_objects(self):
@@ -88,13 +83,14 @@ class SimpleTool(TableTop):
             PU.sample_positions_in_box([0.4, 0.4], [0.0, 0.0], [z, z]), PBU.unit_quat())
 
 
-class SimpleToolAP(SimpleTool):
+class ToolAP(ToolBaseEnv):
     def _create_skill_lib(self):
         lib_skills = (
             skills.GraspTopPos(
                 name="grasp", lift_height=0.1, lift_speed=0.01, reach_distance=0.03, grasp_speed=0.1,
                 params=OrderedDict(
-                    grasp_pos=skills.SkillParamsContinuous(low=[-0.2, -0.03, 0.03], high=[0.3, 0.03, 0.05]),
+                    grasp_pos=skills.SkillParamsContinuous(low=[-0.3, -0.2, 0.03], high=[0.3, 0.1, 0.05]),
+                    # grasp_orn=skills.SkillParamsDiscrete(size=2)
                 )
             ),
             skills.PlaceFixed(name="place", retract_distance=0.1),
@@ -103,7 +99,7 @@ class SimpleToolAP(SimpleTool):
                 orientations=OrderedDict([(k, skills.ALL_ORIENTATIONS[k]) for k in ["front"]]),
                 params=OrderedDict(
                     start_pos=skills.SkillParamsContinuous(low=[0.0, 0.05, 0.02], high=[0.1, 0.15, 0.02]),
-                    move_pos=skills.SkillParamsContinuous(low=[0.4, 0, 0], high=[0.4, 0, 0]),
+                    move_pos=skills.SkillParamsContinuous(low=[0.2, -0.1, 0], high=[0.4, 0.1, 0]),
                     start_orn=skills.SkillParamsDiscrete(size=1)
                 )
             ),
@@ -111,10 +107,11 @@ class SimpleToolAP(SimpleTool):
                 name="poke", num_pause_steps=30, move_speed=0.02,
                 orientations=OrderedDict([(k, skills.ALL_ORIENTATIONS[k]) for k in ["back"]]),
                 params=OrderedDict(
-                    start_pos=skills.SkillParamsContinuous(low=[0.6, 0.0, -0.01], high=[0.6, 0.0, 0.01]),
+                    start_pos=skills.SkillParamsContinuous(low=[0.55, -0.05, -0.01], high=[0.65, 0.05, 0.01]),
                     move_pos=skills.SkillParamsContinuous(low=[-0.45, 0, 0], high=[-0.35, 0, 0]),
                     start_orn=skills.SkillParamsDiscrete(size=1)
-                )
+                ),
+                joint_resolutions=(0.05, 0.05, 0.05, np.pi / 32, np.pi / 32, np.pi / 32)
             ),
             skills.ConditionSkill(
                 name="on_target",
@@ -139,7 +136,6 @@ class SimpleToolAP(SimpleTool):
 
     def _sample_task(self):
         self.target_object = np.random.choice(["cube1", "cube2"])  # randomly choose one of the object as target
-        # self.target_object = "cube1"
         self._task_spec = np.array([self.skill_lib.name_to_skill_index("on_target"),
                                     self.objects.names.index(self.target_object)])
 
@@ -201,101 +197,6 @@ class SimpleToolAP(SimpleTool):
         return skeleton
 
 
-class SimpleToolHardAP(SimpleToolAP):
-    def _create_skill_lib(self):
-        lib_skills = (
-            skills.GraspTopPos(
-                name="grasp", lift_height=0.1, lift_speed=0.01, reach_distance=0.03, grasp_speed=0.1,
-                params=OrderedDict(
-                    grasp_pos=skills.SkillParamsContinuous(low=[-0.2, -0.05, 0.03], high=[0.3, 0.05, 0.05]),
-                )
-            ),
-            skills.PlaceFixed(name="place", retract_distance=0.1),
-            skills.MoveWithPosDiscreteOrn(
-                name="hook", num_pause_steps=30, move_speed=0.02,
-                orientations=OrderedDict([(k, skills.ALL_ORIENTATIONS[k]) for k in ["front"]]),
-                params=OrderedDict(
-                    start_pos=skills.SkillParamsContinuous(low=[0.0, 0.05, 0.02], high=[0.1, 0.15, 0.02]),
-                    move_pos=skills.SkillParamsContinuous(low=[0.2, -0.1, 0], high=[0.4, 0.1, 0]),
-                    start_orn=skills.SkillParamsDiscrete(size=1)
-                )
-            ),
-            skills.MoveWithPosDiscreteOrn(
-                name="poke", num_pause_steps=30, move_speed=0.02,
-                orientations=OrderedDict([(k, skills.ALL_ORIENTATIONS[k]) for k in ["back"]]),
-                params=OrderedDict(
-                    start_pos=skills.SkillParamsContinuous(low=[0.55, -0.05, -0.01], high=[0.65, 0.05, 0.01]),
-                    move_pos=skills.SkillParamsContinuous(low=[-0.45, 0, 0], high=[-0.35, 0, 0]),
-                    start_orn=skills.SkillParamsDiscrete(size=1)
-                )
-            ),
-            skills.ConditionSkill(
-                name="on_target",
-                precondition_fn=lambda oid: PBU.is_center_placed_on(oid, self.objects["target"].body_id),
-            ),
-            skills.ConditionSkill(
-                name="on_cube1",
-                precondition_fn=lambda oid: PBU.is_center_placed_on(oid, self.objects["cube1"].body_id),
-            ),
-            skills.ConditionSkill(
-                name="on_cube1_on_target",
-                precondition_fn=lambda oid: PBU.is_center_placed_on(oid, self.objects["cube1"].body_id) and
-                                            PBU.is_center_placed_on(self.objects["cube1"].body_id,
-                                                                    self.objects["target"].body_id),
-            )
-        )
-        self.skill_lib = skills.SkillLibrary(self, self.planner, obstacles=self.obstacles, skills=lib_skills)
-
-
-class ToolAP(SimpleToolAP):
-    def _create_skill_lib(self):
-        lib_skills = (
-            skills.GraspTopPos(
-                name="grasp", lift_height=0.1, lift_speed=0.01, reach_distance=0.03, grasp_speed=0.1,
-                params=OrderedDict(
-                    grasp_pos=skills.SkillParamsContinuous(low=[-0.3, -0.2, 0.03], high=[0.3, 0.1, 0.05]),
-                    # grasp_orn=skills.SkillParamsDiscrete(size=2)
-                )
-            ),
-            skills.PlaceFixed(name="place", retract_distance=0.1),
-            skills.MoveWithPosDiscreteOrn(
-                name="hook", num_pause_steps=30, move_speed=0.02,
-                orientations=OrderedDict([(k, skills.ALL_ORIENTATIONS[k]) for k in ["front"]]),
-                params=OrderedDict(
-                    start_pos=skills.SkillParamsContinuous(low=[0.0, 0.05, 0.02], high=[0.1, 0.15, 0.02]),
-                    move_pos=skills.SkillParamsContinuous(low=[0.2, -0.1, 0], high=[0.4, 0.1, 0]),
-                    start_orn=skills.SkillParamsDiscrete(size=1)
-                )
-            ),
-            skills.MoveWithPosDiscreteOrn(
-                name="poke", num_pause_steps=30, move_speed=0.02,
-                orientations=OrderedDict([(k, skills.ALL_ORIENTATIONS[k]) for k in ["back"]]),
-                params=OrderedDict(
-                    start_pos=skills.SkillParamsContinuous(low=[0.55, -0.05, -0.01], high=[0.65, 0.05, 0.01]),
-                    move_pos=skills.SkillParamsContinuous(low=[-0.45, 0, 0], high=[-0.35, 0, 0]),
-                    start_orn=skills.SkillParamsDiscrete(size=1)
-                ),
-                joint_resolutions=(0.05, 0.05, 0.05, np.pi / 32, np.pi / 32, np.pi / 32)
-            ),
-            skills.ConditionSkill(
-                name="on_target",
-                precondition_fn=lambda oid: PBU.is_center_placed_on(oid, self.objects["target"].body_id),
-            ),
-            skills.ConditionSkill(
-                name="on_cube1",
-                precondition_fn=lambda oid: PBU.is_center_placed_on(oid, self.objects["cube1"].body_id),
-            ),
-            skills.ConditionSkill(
-                name="on_cube1_on_target",
-                precondition_fn=lambda oid: PBU.is_center_placed_on(oid, self.objects["cube1"].body_id) and
-                                            PBU.is_center_placed_on(self.objects["cube1"].body_id,
-                                                                    self.objects["target"].body_id),
-            )
-        )
-        self.skill_lib = skills.SkillLibrary(self, self.planner, obstacles=self.obstacles, skills=lib_skills)
-        # PBU.draw_aabb(aabb=[[-0.1, 0.1, 0.7], [0.5, 0.4, 0.7]])
-
-
 class ToolStackAP(ToolAP):
     @property
     def excluded_skills(self):
@@ -350,30 +251,3 @@ class ToolStackAP(ToolAP):
             "cube2"
         )]
         return skeleton
-
-
-class ToolStackEasyAP(ToolStackAP):
-    def get_constrained_skill_param_sampler(self, skill_name, object_name, num_samples=None):
-        if skill_name == "grasp" and object_name == "tool":
-            return lambda: self.skill_lib.sample_serialized_skill_params(
-                "grasp", num_samples=num_samples, grasp_pos=dict(low=[-0.2, -0.1, 0.03], high=[0.3, 0.1, 0.05])
-            )
-        elif skill_name == "poke":
-            return lambda: self.skill_lib.sample_serialized_skill_params(
-                "poke", num_samples=num_samples,
-                start_pos=dict(low=[0.55, -0.01, -0.01], high=[0.65, 0.01, 0.01])
-            )
-        elif skill_name == "grasp" and object_name in ["cube1", "cube2"]:
-            return lambda: self.skill_lib.sample_serialized_skill_params(
-                    "grasp", num_samples=num_samples, grasp_pos=dict(low=[0, 0, 0.04], high=[0, 0, 0.05]))
-        else:
-            return lambda: self.skill_lib.sample_serialized_skill_params(skill_name, num_samples=num_samples)
-
-
-class ToolStackMediumAP(ToolStackAP):
-    def get_constrained_skill_param_sampler(self, skill_name, object_name, num_samples=None):
-        if skill_name == "grasp" and object_name in ["cube1", "cube2"]:
-            return lambda: self.skill_lib.sample_serialized_skill_params(
-                    "grasp", num_samples=num_samples, grasp_pos=dict(low=[0, 0, 0.04], high=[0, 0, 0.05]))
-        else:
-            return lambda: self.skill_lib.sample_serialized_skill_params(skill_name, num_samples=num_samples)
