@@ -15,7 +15,7 @@ If you find this codebase useful, please cite the work using the following bibte
 ```
 
 ## Getting Started
-###1. Install DeftEnv:
+### 1. Install DeftEnv:
 ```
 $ git clone https://github.com/danfeiX/deftenv.git
 $ cd deftenv
