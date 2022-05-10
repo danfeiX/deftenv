@@ -20,6 +20,8 @@ setup(
         "h5py",
         "imageio",
         "imageio-ffmpeg",
+        "opencv",
+        "pybullet"
     ],
     eager_resources=['*'],
     include_package_data=True,

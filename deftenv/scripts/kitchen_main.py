@@ -101,7 +101,7 @@ def extract_dataset(args):
 
     if os.path.exists(out_path):
         os.remove(out_path)
-    out_f = h5py.File(out_path)
+    out_f = h5py.File(out_path, "a")
     f_grp = out_f.create_group("data")
 
     env_args = json.loads(f["data"].attrs["env_args"])
@@ -169,7 +169,7 @@ def extract_dataset_skills(args):
 
     if os.path.exists(out_path):
         os.remove(out_path)
-    out_f = h5py.File(out_path)
+    out_f = h5py.File(out_path, "a")
     f_grp = out_f.create_group("data")
 
     env_args = json.loads(f["data"].attrs["env_args"])
@@ -202,12 +202,12 @@ def extract_dataset_skills(args):
         # extract the last @skill_frame_ratio fraction of the demo for goals
         # mask[mask_inds[-2] + int(skill_len[-1] * (1 - args.skill_frame_ratio)):] = True
 
-        states = f["data/{}/states".format(demo_id)][mask, ...]
+        states = f["data/{}/states".format(demo_id)][:][mask, ...]
         task_spec = f["data/{}/task_specs".format(demo_id)][0]
         env.reset_to(states[0], return_obs=False)
         env.set_goal(task_specs=task_spec)
-        skill_params = f["data/{}/skill_params".format(demo_id)][mask, ...]
-        object_index = f["data/{}/skill_object_index".format(demo_id)][mask, ...]
+        skill_params = f["data/{}/skill_params".format(demo_id)][:][mask, ...]
+        object_index = f["data/{}/skill_object_index".format(demo_id)][:][mask, ...]
         actions = np.concatenate((skill_params, object_index), axis=1)
 
         new_states = []
@@ -241,9 +241,9 @@ def extract_dataset_skills(args):
             if k == "skill_param_dict":
                 # skill_param_dict is a dictionary
                 for kk in org_f_grp[k].keys():
-                    demo_grp.create_dataset("{}/{}".format(k, kk), data=org_f_grp[k][kk][mask, ...][ep_indices])
+                    demo_grp.create_dataset("{}/{}".format(k, kk), data=org_f_grp[k][kk][:][mask, ...][ep_indices])
             elif k not in ["states", "actions"]:
-                demo_grp.create_dataset(k, data=org_f_grp[k][mask, ...][ep_indices])
+                demo_grp.create_dataset(k, data=org_f_grp[k][:][mask, ...][ep_indices])
         demo_grp.create_dataset("states", data=new_states[ep_indices])
         demo_grp.create_dataset("actions", data=actions[ep_indices])
 
@@ -345,13 +345,15 @@ def main():
     parser.add_argument(
         "--keep_failed_demos",
         action="store_true",
-        default=False
+        default=False,
+        help="Keep demos that do not reach the goal."
     )
 
     parser.add_argument(
         "--keep_interrupted_demos",
         action="store_true",
-        default=False
+        default=False,
+        help="Keep demos that are interrupted by plan failure (i.e.., unafforded skills)"
     )
 
     parser.add_argument(
