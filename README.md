@@ -41,3 +41,7 @@ Extract training data from the demonstrations that we just collected in `demo.hd
 ```angular2html
 python deftenv/scripts/kitchen_main.py --mode extract_skill --file demo.hdf5 --extract_name training_data.hdf5
 ```
+
+## Acknowledgement
+- The kitchen environment assets are created by [William Shen](https://cs.stanford.edu/people/bshen88/#publications).
+- The pybullet tools are borrowed from Caelan's awesome PyBullet Planning [codebase](https://github.com/caelan/pybullet-planning).
