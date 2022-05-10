@@ -37,7 +37,7 @@ $ python scripts/kitchen_main.py --mode demo --env KitchenDualCoffeeAP --file de
 ```
 
 ### 3. Extract training data
-Extract training data for the demonstrations that we just collected in `demo.hdf5`
+Extract training data from the demonstrations that we just collected in `demo.hdf5`
 ```angular2html
 python deftenv/scripts/kitchen_main.py --mode extract_skill --file demo.hdf5 --extract_name training_data.hdf5
 ```
