@@ -20,7 +20,7 @@ If you find this codebase useful, please cite the work using the following bibte
 $ git clone https://github.com/danfeiX/deftenv.git
 $ cd deftenv
 # you may want to create a separate virtualenv to avoid package contamination
-$ pip install -e deftenv
+$ pip install -e .
 ```
 
 ### 2. Run an example
