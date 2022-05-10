@@ -30,11 +30,11 @@ def record_demos(args):
         num_sim_per_step=5,
         sim_time_step=1./240.,
     )
-    env = env_factory(args.env, **env_kwargs, use_planner=True, hide_planner=True, use_gui=args.gui, use_skills=True)
+    env = env_factory(args.env, **env_kwargs, use_planner=True, hide_planner_robot=True, use_gui=args.gui, use_skills=True)
 
     if os.path.exists(args.file):
         os.remove(args.file)
-    f = h5py.File(args.file)
+    f = h5py.File(args.file, "a")
     f_sars_grp = f.create_group("data")
 
     env_args = dict(
